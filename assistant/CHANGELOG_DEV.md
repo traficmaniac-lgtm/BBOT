@@ -1,6 +1,6 @@
 # CHANGELOG_DEV
-- Added Binance data layer (HTTP client with retries, data service, websocket helper) and models for PairInfo/MarketSnapshot/Fee flags.
-- Updated UI to terminal-style panes with trading panel showing real-time market snapshot, filters, and connection status.
-- Introduced AI autopilot skeleton (advisor, decision/execution/policy guard scaffolding).
-- Added unit tests for Binance parsing and websocket reconnect handling; documented future AI actions contract.
-- Fixed trading config schema by adding fee_free_whitelist with defaults and template update.
+- Rebuilt Tkinter app into router-driven screens (setup/pair-select/trade) and removed legacy tabs/panels.
+- Added OpenAI chat client with real completions, retries, schema validation, and mock fallback when no key.
+- Tightened Binance data path to REST-only sources (exchangeInfo, ticker/24hr, bookTicker, time) with latency tracking and overview aggregation.
+- Trade screen now surfaces market snapshot, symbol filters, settings preview, AI chat apply/copy actions, and start/stop controls for paper mode.
+- Updated config schema and example to new trading fields (budget/max_orders/grid_step/take_profit/stop_loss/cooldown/update_interval).

@@ -22,8 +22,8 @@ class ApiKeys(BaseModel):
 
 
 class AppSettings(BaseModel):
-    mode: str = Field("mock", description="mock | live")
-    active_pair: str = "BTCUSDT"
+    mode: str = Field("paper", description="paper | live")
+    active_pair: str = ""
     exchange: str = "binance"
     testnet: bool = True
     log_level: str = "INFO"
@@ -33,6 +33,7 @@ class AiSettings(BaseModel):
     model: str = "gpt-4.1-mini"
     temperature: float = 0.2
     max_retries: int = 2
+    timeout_seconds: int = 20
 
 
 class PairSettings(BaseModel):
@@ -42,17 +43,12 @@ class PairSettings(BaseModel):
 
 class TradingSettings(BaseModel):
     budget_usdt: float = 100
-    leverage: int = 1
-    timeframe: str = "1h"
-    take_profit_pct: float = 3.0
-    stop_loss_pct: float = 1.5
-    fee_free_whitelist: list[str] = Field(default_factory=list)
-
-
-class RiskSettings(BaseModel):
-    max_drawdown_pct: float = 15
-    per_trade_risk_pct: float = 2
-    max_concurrent_trades: int = 3
+    max_orders: int = 5
+    grid_step_pct: float = 0.5
+    take_profit_pct: float = 1.5
+    stop_loss_pct: float = 1.0
+    cooldown_seconds: int = 10
+    update_interval_ms: int = 1000
 
 
 class Config(BaseModel):
@@ -61,7 +57,6 @@ class Config(BaseModel):
     ai: AiSettings = AiSettings()
     pairs: PairSettings = PairSettings()
     trading: TradingSettings = TradingSettings()
-    risk: RiskSettings = RiskSettings()
 
 
 class ConfigService:
@@ -69,6 +64,10 @@ class ConfigService:
         self.default_path = default_path
         self.config = Config()
         self.last_loaded: Optional[Path] = None
+
+    def has_required_keys(self) -> bool:
+        keys = self.config.api_keys
+        return bool(keys.exchange_key and keys.exchange_secret and keys.openai_key)
 
     def load(self, path: Optional[Path] = None) -> Config:
         path = path or self.default_path
@@ -78,9 +77,6 @@ class ConfigService:
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
 
-        trading_data = data.setdefault("trading", {}) or {}
-        trading_data.setdefault("fee_free_whitelist", [])
-        data["trading"] = trading_data
         try:
             self.config = Config(**data)
             self.last_loaded = path

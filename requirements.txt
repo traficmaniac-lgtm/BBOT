@@ -1,4 +1,6 @@
-﻿python-binance
+python-binance
 pydantic
 pyyaml
 rich
+requests
+openai
