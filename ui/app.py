@@ -191,13 +191,13 @@ class BBOTApp:
     # Utilities
     def refresh_status_bar(self) -> None:
         cfg = self.config_service.config
-        binance_status = "Connected" if self.http_client.last_latency_ms else "Idle"
-        openai_status = "Ready" if self.ai_client.can_run_live() else "No Key/Mock"
+        binance_status = "Connected" if self.http_client.last_latency_ms else "Error" if self.banner_var.get().startswith("Binance") else "Idle"
+        openai_status = "Ready" if self.ai_client.can_run_live() else "Not configured"
         active_pair = cfg.app.active_pair or "-"
         state = self.state.state
         latency = f"{self.http_client.last_latency_ms:.0f}ms" if self.http_client.last_latency_ms else "-"
         self.status_var.set(
-            f"Binance: {binance_status} (latency {latency}) | OpenAI: {openai_status} | Active Pair: {active_pair} | State: {state}"
+            f"Binance: {binance_status} ({latency})  |  OpenAI: {openai_status}  |  Pair: {active_pair}  |  State: {state}"
         )
 
     def _rebuild_services(self) -> None:
