@@ -8,7 +8,8 @@ from ai.prompt_builder import build_prompt
 from core.config_service import ConfigService
 from core.logger import setup_logger
 from core.state import AppState, StateMachine
-from exchanges.mock import load_fee_free_pairs
+from exchanges.binance_client import BinanceClient
+from exchanges.pairs_loader import PairLoader
 from risk.rules import validate_risk
 
 
@@ -19,6 +20,12 @@ class BBOTApp:
         self.state = StateMachine()
         self.config_service = ConfigService()
         self.logger = setup_logger(level=self.config_service.config.app.log_level)
+        self.binance_client = BinanceClient(
+            api_key=self.config_service.config.api_keys.exchange_key,
+            api_secret=self.config_service.config.api_keys.exchange_secret,
+            testnet=self.config_service.config.app.testnet,
+            logger=self.logger,
+        )
         self.ai_client = AiClient(self.state, self.logger, mock=True)
         self.pairs = []
         self.filtered_pairs = []
@@ -72,15 +79,48 @@ class BBOTApp:
     def _build_pairs_tab(self) -> None:
         control_frame = ttk.Frame(self.pairs_frame)
         control_frame.pack(fill="x", padx=10, pady=5)
-        ttk.Button(control_frame, text="Load fee-free pairs", command=self._load_pairs).pack(side="left")
-        ttk.Label(control_frame, text="Filter:").pack(side="left", padx=(10, 2))
+        ttk.Button(control_frame, text="Load pairs from Binance", command=self._load_pairs).pack(side="left")
+
+        ttk.Label(control_frame, text="Search:").pack(side="left", padx=(10, 2))
         self.filter_var = tk.StringVar()
         self.filter_var.trace_add("write", lambda *_: self._filter_pairs())
-        ttk.Entry(control_frame, textvariable=self.filter_var, width=20).pack(side="left")
+        ttk.Entry(control_frame, textvariable=self.filter_var, width=18).pack(side="left")
 
-        self.pairs_tree = ttk.Treeview(self.pairs_frame, columns=("symbol", "type", "fee"), show="headings")
-        for col in ("symbol", "type", "fee"):
-            self.pairs_tree.heading(col, text=col.title())
+        ttk.Label(control_frame, text="Quote:").pack(side="left", padx=(10, 2))
+        self.quote_filter_var = tk.StringVar(value="ALL")
+        self.quote_filter = ttk.Combobox(
+            control_frame,
+            textvariable=self.quote_filter_var,
+            values=["ALL", "USDT", "USDC", "FDUSD"],
+            width=8,
+            state="readonly",
+        )
+        self.quote_filter.bind("<<ComboboxSelected>>", lambda *_: self._filter_pairs())
+        self.quote_filter.pack(side="left")
+
+        self.fee_free_only_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            control_frame,
+            text="Fee-Free only",
+            variable=self.fee_free_only_var,
+            command=self._filter_pairs,
+        ).pack(side="left", padx=(10, 0))
+
+        self.pairs_tree = ttk.Treeview(
+            self.pairs_frame,
+            columns=("symbol", "base", "quote", "fee_free", "fee_method"),
+            show="headings",
+        )
+        headings = {
+            "symbol": "Symbol",
+            "base": "Base",
+            "quote": "Quote",
+            "fee_free": "FeeFree",
+            "fee_method": "FeeMethod",
+        }
+        for col, label in headings.items():
+            self.pairs_tree.heading(col, text=label)
+            self.pairs_tree.column(col, stretch=True, width=100)
         self.pairs_tree.pack(fill="both", expand=True, padx=10, pady=5)
         self.pairs_tree.bind("<<TreeviewSelect>>", self._on_pair_select)
 
@@ -202,8 +242,20 @@ class BBOTApp:
 
     # Actions
     def _refresh_status(self) -> None:
+        exchange_status = "Connected" if self.pairs else "Not loaded"
+        ai_status = (
+            "Ready" if self.config_service.config.api_keys.openai_key else "Mock (no key)"
+        )
         self.status_var.set(
-            f"State: {self.state.state} | Active config: {self.config_service.active_config_name()}"
+            " | ".join(
+                [
+                    f"State: {self.state.state}",
+                    f"Pair: {self.config_service.config.app.active_pair}",
+                    f"Exchange: {exchange_status}",
+                    f"AI: {ai_status}",
+                    f"Active config: {self.config_service.active_config_name()}",
+                ]
+            )
         )
         prompt = build_prompt(self.config_service.config)
         self._set_text(self.prompt_text, prompt)
@@ -214,25 +266,52 @@ class BBOTApp:
         summary = (
             f"Exchange: {cfg.app.exchange} ({'testnet' if cfg.app.testnet else 'live'}), mode={cfg.app.mode}\n"
             f"AI client: {self.ai_client.describe()}\n"
-            f"Active pair: {cfg.app.active_pair}\n"
+            f"Active pair: {cfg.app.active_pair} | Loaded pairs: {len(self.pairs)}\n"
             f"Trading: budget {cfg.trading.budget_usdt} USDT, TP {cfg.trading.take_profit_pct}% / SL {cfg.trading.stop_loss_pct}%\n"
             f"State: {self.state.state}"
         )
         self.dashboard_status.set(summary)
 
     def _load_pairs(self) -> None:
-        self.pairs = load_fee_free_pairs()
+        cfg = self.config_service.config
+        loader = PairLoader(
+            self.binance_client,
+            manual_fee_free=cfg.pairs.manual_fee_free,
+            heuristic_quote_whitelist=cfg.pairs.heuristic_quote_whitelist,
+            logger=self.logger,
+        )
+        self.pairs = loader.load()
         self._filter_pairs()
         self.state.set_state(AppState.PAIRS_LOADED)
-        self._log("Loaded fee-free pairs (mock)")
+        self._log("Loaded pairs from Binance (with fallback if needed)")
 
     def _filter_pairs(self) -> None:
         term = self.filter_var.get().lower()
-        self.filtered_pairs = [p for p in self.pairs if term in p["symbol"].lower()]
+        quote = self.quote_filter_var.get()
+        fee_only = self.fee_free_only_var.get()
+        self.filtered_pairs = []
+        for pair in self.pairs:
+            if term and term not in pair.get("symbol", "").lower():
+                continue
+            if quote != "ALL" and pair.get("quote", "").upper() != quote:
+                continue
+            if fee_only and not pair.get("fee_free"):
+                continue
+            self.filtered_pairs.append(pair)
         for item in self.pairs_tree.get_children():
             self.pairs_tree.delete(item)
         for pair in self.filtered_pairs:
-            self.pairs_tree.insert("", "end", values=(pair["symbol"], pair["type"], pair["fee"]))
+            self.pairs_tree.insert(
+                "",
+                "end",
+                values=(
+                    pair.get("symbol"),
+                    pair.get("base"),
+                    pair.get("quote"),
+                    pair.get("fee_free"),
+                    pair.get("fee_method"),
+                ),
+            )
 
     def _on_pair_select(self, _event) -> None:
         selection = self.pairs_tree.selection()
@@ -245,6 +324,7 @@ class BBOTApp:
             self.state.set_state(AppState.PAIRS_LOADED)
             self._refresh_status()
             self._log(f"Selected pair: {symbol}")
+            self.notebook.select(self.trading_frame)
 
     def _run_ai(self) -> None:
         prompt = build_prompt(self.config_service.config)
@@ -314,6 +394,12 @@ class BBOTApp:
         cfg.risk.max_drawdown_pct = float(self.risk_vars["max_drawdown_pct"].get() or 0)
         cfg.risk.per_trade_risk_pct = float(self.risk_vars["per_trade_risk_pct"].get() or 0)
         cfg.risk.max_concurrent_trades = int(float(self.risk_vars["max_concurrent_trades"].get() or 0))
+        self.binance_client = BinanceClient(
+            api_key=cfg.api_keys.exchange_key,
+            api_secret=cfg.api_keys.exchange_secret,
+            testnet=cfg.app.testnet,
+            logger=self.logger,
+        )
         try:
             self.config_service.save()
             self.state.set_state(AppState.CONFIGURED)

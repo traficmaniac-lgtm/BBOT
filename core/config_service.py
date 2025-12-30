@@ -35,6 +35,11 @@ class AiSettings(BaseModel):
     max_retries: int = 2
 
 
+class PairSettings(BaseModel):
+    manual_fee_free: list[str] = []
+    heuristic_quote_whitelist: list[str] = ["FDUSD"]
+
+
 class TradingSettings(BaseModel):
     budget_usdt: float = 100
     leverage: int = 1
@@ -53,6 +58,7 @@ class Config(BaseModel):
     app: AppSettings = AppSettings()
     api_keys: ApiKeys = ApiKeys()
     ai: AiSettings = AiSettings()
+    pairs: PairSettings = PairSettings()
     trading: TradingSettings = TradingSettings()
     risk: RiskSettings = RiskSettings()
 
