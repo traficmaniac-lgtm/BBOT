@@ -1,13 +1,12 @@
-from typing import List, Dict
+from typing import Dict, List
 
 FEE_FREE_PAIRS = [
-    {"symbol": "BTCUSDT", "type": "spot", "fee": 0.0},
-    {"symbol": "ETHUSDT", "type": "spot", "fee": 0.0},
-    {"symbol": "BNBUSDT", "type": "spot", "fee": 0.0},
-    {"symbol": "SOLUSDT", "type": "spot", "fee": 0.0},
+    {"symbol": "BTCUSDT", "base": "BTC", "quote": "USDT", "fee_free": True, "fee_method": "Heuristic"},
+    {"symbol": "ETHUSDT", "base": "ETH", "quote": "USDT", "fee_free": True, "fee_method": "Heuristic"},
+    {"symbol": "BNBUSDT", "base": "BNB", "quote": "USDT", "fee_free": True, "fee_method": "Heuristic"},
+    {"symbol": "SOLUSDT", "base": "SOL", "quote": "USDT", "fee_free": True, "fee_method": "Heuristic"},
 ]
 
 
 def load_fee_free_pairs() -> List[Dict[str, str]]:
-    return FEE_FREE_PAIRS.copy()
-
+    return [pair.copy() for pair in FEE_FREE_PAIRS]
