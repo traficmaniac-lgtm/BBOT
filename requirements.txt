@@ -1,0 +1,4 @@
+﻿python-binance
+pydantic
+pyyaml
+rich
