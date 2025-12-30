@@ -46,6 +46,7 @@ class TradingSettings(BaseModel):
     timeframe: str = "1h"
     take_profit_pct: float = 3.0
     stop_loss_pct: float = 1.5
+    fee_free_whitelist: list[str] = Field(default_factory=list)
 
 
 class RiskSettings(BaseModel):
@@ -76,6 +77,10 @@ class ConfigService:
 
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
+
+        trading_data = data.setdefault("trading", {}) or {}
+        trading_data.setdefault("fee_free_whitelist", [])
+        data["trading"] = trading_data
         try:
             self.config = Config(**data)
             self.last_loaded = path

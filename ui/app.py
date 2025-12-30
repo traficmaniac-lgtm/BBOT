@@ -23,7 +23,7 @@ class BBOTApp:
         self.http_client = BinanceHttpClient(logger=self.logger)
         self.binance_service = BinanceDataService(
             self.http_client,
-            manual_fee_free=self.config_service.config.trading.fee_free_whitelist,
+            manual_fee_free=getattr(self.config_service.config.trading, "fee_free_whitelist", []),
             heuristic_quotes=["FDUSD"],
             logger=self.logger,
         )

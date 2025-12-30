@@ -26,6 +26,7 @@ trading:
   timeframe: 1h
   take_profit_pct: 3.0
   stop_loss_pct: 1.5
+  fee_free_whitelist: []
 
 risk:
   max_drawdown_pct: 15
