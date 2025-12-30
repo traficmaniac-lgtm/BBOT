@@ -1,9 +1,4 @@
-# Questions for Victoria
-
-| Вопрос | Контекст | Варианты | Рекомендация Codex |
-| --- | --- | --- | --- |
-| Нужен ли живой OpenAI вызов в v0.1? | Сейчас стоит мок-режим, ключ не задан. | 1) Оставить мок 2) Подключить openai-python 3) Делать вызов через REST | Оставить мок до появления ключей; добавить openai-python позже. |
-| Какая приоритетная биржа первая? | Каркас готов, пара загружается из мока. | 1) Binance 2) OKX 3) Bybit | Предлагаю Binance (наиболее популярна). |
-| Поддерживать ли фьючерсы сразу? | Текущие настройки под спот/фьючерсы обобщённо. | 1) Только спот 2) Спот+фьючерсы 3) Фьючерсы потом | Начать со спота, добавить фьючерсы после стабилизации. |
-| Есть ли готовые макеты/цветовая схема для профессионального UI? | Требуется привести UI к единому стилю и статусбару. | 1) Использовать кастомный ttk стиль 2) Подключить тему (ttkbootstrap) 3) Минимальный кастом | Предпочитаю единый ttk стиль без новых зависимостей, если ок. |
-| Допустимо ли объединить будущие изменения в один крупный релиз? | Пользователь запросил серию фич с отдельными коммитами. | 1) Делать поэтапные PR 2) Один большой PR | Рекомендую поэтапно, чтобы было проще ревью и тестировать. |
+# QUESTIONS
+- Should we prioritize full websocket streaming for the active pair (bookTicker/miniTicker) in the trading panel, or keep REST snapshot refresh?
+- Any specific fee-free symbols we should whitelist manually until Binance exposes an explicit API flag?
+- Do we need persistence for saved profiles in the new trading panel (profiles/*.yaml) immediately, or plan for next iteration?

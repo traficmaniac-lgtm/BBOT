@@ -29,3 +29,15 @@
 ## Ошибки
 - Любое отклонение формата → state = ERROR, запись в лог, повтор запроса (до 2 раз в мок-режиме).
 
+
+## Contract B: Future action payload (AUTOPILOT)
+AI will return a list of actions with schema:
+```
+{
+  "actions": [
+    {"type": "buy" | "sell" | "cancel" | "update", "symbol": "BTCUSDT", "amount": 0.1, "reason": "signal text"}
+  ],
+  "notes": "why the plan is safe"
+}
+```
+Each action will be validated by `core.policy_guard.PolicyGuard` before any execution.

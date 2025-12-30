@@ -8,7 +8,7 @@ from ai.prompt_builder import build_prompt
 from core.config_service import ConfigService
 from core.logger import setup_logger
 from core.state import AppState, StateMachine
-from exchanges.binance_client import BinanceClient
+from exchanges.binance import BinanceDataService, BinanceHttpClient
 from exchanges.pairs_loader import PairLoader
 from risk.rules import validate_risk
 
@@ -20,15 +20,18 @@ class BBOTApp:
         self.state = StateMachine()
         self.config_service = ConfigService()
         self.logger = setup_logger(level=self.config_service.config.app.log_level)
-        self.binance_client = BinanceClient(
-            api_key=self.config_service.config.api_keys.exchange_key,
-            api_secret=self.config_service.config.api_keys.exchange_secret,
-            testnet=self.config_service.config.app.testnet,
+        self.http_client = BinanceHttpClient(logger=self.logger)
+        self.binance_service = BinanceDataService(
+            self.http_client,
+            manual_fee_free=self.config_service.config.trading.fee_free_whitelist,
+            heuristic_quotes=["FDUSD"],
             logger=self.logger,
         )
         self.ai_client = AiClient(self.state, self.logger, mock=True)
         self.pairs = []
         self.filtered_pairs = []
+        self.active_pair = None
+        self.market_snapshot = None
 
         self._build_layout()
         self._refresh_status()
@@ -40,27 +43,55 @@ class BBOTApp:
         status_frame.pack(fill="x")
         ttk.Label(status_frame, textvariable=self.status_var).pack(side="left", padx=5, pady=5)
 
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True)
+        self.main_panes = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
+        self.main_panes.pack(fill="both", expand=True)
 
-        self.dashboard_frame = ttk.Frame(self.notebook)
-        self.pairs_frame = ttk.Frame(self.notebook)
-        self.ai_frame = ttk.Frame(self.notebook)
-        self.trading_frame = ttk.Frame(self.notebook)
-        self.risk_frame = ttk.Frame(self.notebook)
-        self.logs_frame = ttk.Frame(self.notebook)
-        self.settings_frame = ttk.Frame(self.notebook)
+        # Left sidebar
+        self.sidebar = ttk.Frame(self.main_panes, width=180)
+        ttk.Label(self.sidebar, text="Navigation", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+        for name, tab in [
+            ("Dashboard", 0),
+            ("Pairs", 1),
+            ("Risk", 2),
+            ("Logs", 3),
+            ("Settings", 4),
+        ]:
+            ttk.Button(self.sidebar, text=name, command=lambda idx=tab: self.center_notebook.select(idx)).pack(
+                fill="x", padx=10, pady=2
+            )
+        ttk.Separator(self.sidebar, orient=tk.HORIZONTAL).pack(fill="x", pady=5)
+        ttk.Label(self.sidebar, text="Bots / Profiles").pack(anchor="w", padx=10)
+        self.main_panes.add(self.sidebar, weight=0)
 
+        # Center workspace
+        self.center_frame = ttk.Frame(self.main_panes)
+        self.center_notebook = ttk.Notebook(self.center_frame)
+        self.dashboard_frame = ttk.Frame(self.center_notebook)
+        self.pairs_frame = ttk.Frame(self.center_notebook)
+        self.risk_frame = ttk.Frame(self.center_notebook)
+        self.logs_frame = ttk.Frame(self.center_notebook)
+        self.settings_frame = ttk.Frame(self.center_notebook)
         for name, frame in [
             ("Dashboard", self.dashboard_frame),
             ("Pairs", self.pairs_frame),
-            ("AI", self.ai_frame),
-            ("Trading", self.trading_frame),
             ("Risk", self.risk_frame),
             ("Logs", self.logs_frame),
             ("Settings", self.settings_frame),
         ]:
-            self.notebook.add(frame, text=name)
+            self.center_notebook.add(frame, text=name)
+        self.center_notebook.pack(fill="both", expand=True)
+        self.main_panes.add(self.center_frame, weight=3)
+
+        # Right dock
+        self.dock = ttk.Frame(self.main_panes, width=320)
+        ttk.Label(self.dock, text="Trading Panel", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+        self.trading_frame = ttk.Frame(self.dock)
+        self.trading_frame.pack(fill="x", padx=5)
+        ttk.Separator(self.dock, orient=tk.HORIZONTAL).pack(fill="x", pady=5)
+        ttk.Label(self.dock, text="AI Chat", font=("Arial", 10, "bold")).pack(anchor="w", padx=10)
+        self.ai_frame = ttk.Frame(self.dock)
+        self.ai_frame.pack(fill="both", expand=True, padx=5)
+        self.main_panes.add(self.dock, weight=2)
 
         self._build_dashboard_tab()
         self._build_pairs_tab()
@@ -108,13 +139,29 @@ class BBOTApp:
 
         self.pairs_tree = ttk.Treeview(
             self.pairs_frame,
-            columns=("symbol", "base", "quote", "fee_free", "fee_method"),
+            columns=(
+                "symbol",
+                "base",
+                "quote",
+                "status",
+                "tick_size",
+                "step_size",
+                "min_notional",
+                "volume",
+                "fee_free",
+                "fee_method",
+            ),
             show="headings",
         )
         headings = {
             "symbol": "Symbol",
             "base": "Base",
             "quote": "Quote",
+            "status": "Status",
+            "tick_size": "TickSize",
+            "step_size": "StepSize",
+            "min_notional": "MinNotional",
+            "volume": "Vol24h",
             "fee_free": "FeeFree",
             "fee_method": "FeeMethod",
         }
@@ -138,6 +185,50 @@ class BBOTApp:
         ttk.Button(self.ai_frame, text="Apply settings", command=self._apply_ai_settings).pack(anchor="e", padx=10, pady=5)
 
     def _build_trading_tab(self) -> None:
+        self.market_vars = {
+            "active_pair": tk.StringVar(value=self.config_service.config.app.active_pair or ""),
+            "last_price": tk.StringVar(value="-"),
+            "bid": tk.StringVar(value="-"),
+            "ask": tk.StringVar(value="-"),
+            "spread": tk.StringVar(value="-"),
+            "volume": tk.StringVar(value="-"),
+            "tick_size": tk.StringVar(value="-"),
+            "step_size": tk.StringVar(value="-"),
+            "min_notional": tk.StringVar(value="-"),
+            "time_sync": tk.StringVar(value="Not checked"),
+            "rest": tk.StringVar(value="Unknown"),
+            "ws": tk.StringVar(value="Idle"),
+        }
+
+        market_box = ttk.Labelframe(self.trading_frame, text="Market")
+        market_box.pack(fill="x", padx=8, pady=4)
+        for idx, (label, key) in enumerate(
+            [
+                ("Pair", "active_pair"),
+                ("Last", "last_price"),
+                ("Bid", "bid"),
+                ("Ask", "ask"),
+                ("Spread", "spread"),
+                ("Vol 24h", "volume"),
+                ("Tick", "tick_size"),
+                ("Step", "step_size"),
+                ("MinNotional", "min_notional"),
+            ]
+        ):
+            ttk.Label(market_box, text=label).grid(row=idx, column=0, sticky="w", padx=6, pady=1)
+            ttk.Label(market_box, textvariable=self.market_vars[key]).grid(row=idx, column=1, sticky="w", padx=6, pady=1)
+
+        conn_box = ttk.Labelframe(self.trading_frame, text="Connection")
+        conn_box.pack(fill="x", padx=8, pady=4)
+        ttk.Label(conn_box, text="REST").grid(row=0, column=0, sticky="w", padx=6)
+        ttk.Label(conn_box, textvariable=self.market_vars["rest"]).grid(row=0, column=1, sticky="w")
+        ttk.Label(conn_box, text="WS").grid(row=1, column=0, sticky="w", padx=6)
+        ttk.Label(conn_box, textvariable=self.market_vars["ws"]).grid(row=1, column=1, sticky="w")
+        ttk.Label(conn_box, text="Time Sync").grid(row=2, column=0, sticky="w", padx=6)
+        ttk.Label(conn_box, textvariable=self.market_vars["time_sync"]).grid(row=2, column=1, sticky="w")
+        ttk.Button(conn_box, text="Sync", command=self._refresh_time_sync).grid(row=2, column=2, padx=4)
+        ttk.Button(conn_box, text="Retry", command=self._refresh_market_block).grid(row=0, column=2, padx=4)
+
         self.trading_vars = {
             "budget_usdt": tk.StringVar(value=str(self.config_service.config.trading.budget_usdt)),
             "leverage": tk.StringVar(value=str(self.config_service.config.trading.leverage)),
@@ -145,6 +236,8 @@ class BBOTApp:
             "take_profit_pct": tk.StringVar(value=str(self.config_service.config.trading.take_profit_pct)),
             "stop_loss_pct": tk.StringVar(value=str(self.config_service.config.trading.stop_loss_pct)),
         }
+        params_box = ttk.Labelframe(self.trading_frame, text="Execution")
+        params_box.pack(fill="x", padx=8, pady=4)
         row = 0
         for label, key in [
             ("Budget (USDT)", "budget_usdt"),
@@ -153,17 +246,17 @@ class BBOTApp:
             ("Take profit %", "take_profit_pct"),
             ("Stop loss %", "stop_loss_pct"),
         ]:
-            ttk.Label(self.trading_frame, text=label).grid(row=row, column=0, sticky="w", padx=10, pady=2)
-            ttk.Entry(self.trading_frame, textvariable=self.trading_vars[key]).grid(row=row, column=1, sticky="we", padx=10, pady=2)
+            ttk.Label(params_box, text=label).grid(row=row, column=0, sticky="w", padx=10, pady=2)
+            ttk.Entry(params_box, textvariable=self.trading_vars[key]).grid(row=row, column=1, sticky="we", padx=10, pady=2)
             row += 1
-        self.trading_frame.grid_columnconfigure(1, weight=1)
+        params_box.grid_columnconfigure(1, weight=1)
 
         self.run_status_var = tk.StringVar(value="STOPPED")
-        ttk.Label(self.trading_frame, text="Status:").grid(row=row, column=0, sticky="w", padx=10, pady=5)
-        ttk.Label(self.trading_frame, textvariable=self.run_status_var, foreground="green").grid(row=row, column=1, sticky="w", padx=10)
+        ttk.Label(params_box, text="Status:").grid(row=row, column=0, sticky="w", padx=10, pady=5)
+        ttk.Label(params_box, textvariable=self.run_status_var, foreground="green").grid(row=row, column=1, sticky="w", padx=10)
         row += 1
 
-        button_frame = ttk.Frame(self.trading_frame)
+        button_frame = ttk.Frame(params_box)
         button_frame.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=5)
         ttk.Button(button_frame, text="Start", command=self._start_trading).pack(side="left")
         ttk.Button(button_frame, text="Stop", command=self._stop_trading).pack(side="left", padx=5)
@@ -272,18 +365,62 @@ class BBOTApp:
         )
         self.dashboard_status.set(summary)
 
+    def _refresh_market_block(self) -> None:
+        symbol = self.active_pair or self.config_service.config.app.active_pair
+        self.market_vars["active_pair"].set(symbol or "-")
+        if not symbol:
+            return
+        try:
+            snapshot = self.binance_service.fetch_market_snapshot(symbol)
+            self.market_snapshot = snapshot
+            self.market_vars["last_price"].set(snapshot.last_price)
+            self.market_vars["bid"].set(snapshot.bid)
+            self.market_vars["ask"].set(snapshot.ask)
+            self.market_vars["spread"].set(snapshot.spread)
+            self.market_vars["volume"].set(snapshot.volume_24h)
+            pair = next((p for p in self.pairs if p.get("symbol") == symbol), None)
+            if pair:
+                self.market_vars["tick_size"].set(pair.get("tick_size"))
+                self.market_vars["step_size"].set(pair.get("step_size"))
+                self.market_vars["min_notional"].set(pair.get("min_notional"))
+            self.market_vars["rest"].set("OK")
+        except Exception as exc:  # noqa: BLE001
+            self.market_vars["rest"].set("FAIL")
+            messagebox.showerror("Market data", f"Failed to refresh market snapshot: {exc}")
+
+    def _refresh_time_sync(self) -> None:
+        try:
+            status = self.binance_service.time_sync_status()
+            label = f"Offset {status['offset_ms']}ms"
+            if status.get("ok"):
+                label += " (OK)"
+            else:
+                label += " (Drift)"
+            self.market_vars["time_sync"].set(label)
+        except Exception as exc:  # noqa: BLE001
+            self.market_vars["time_sync"].set(f"Failed: {exc}")
+
     def _load_pairs(self) -> None:
         cfg = self.config_service.config
         loader = PairLoader(
-            self.binance_client,
+            self.binance_service,
             manual_fee_free=cfg.pairs.manual_fee_free,
             heuristic_quote_whitelist=cfg.pairs.heuristic_quote_whitelist,
             logger=self.logger,
         )
-        self.pairs = loader.load()
-        self._filter_pairs()
-        self.state.set_state(AppState.PAIRS_LOADED)
-        self._log("Loaded pairs from Binance (with fallback if needed)")
+        try:
+            pairs = loader.load()
+            stats = self.http_client.fetch_ticker_24h()
+            volume_map = {item.get("symbol"): item.get("volume") for item in stats if isinstance(stats, list)} if isinstance(stats, list) else {}
+            for pair in pairs:
+                pair["volume"] = volume_map.get(pair.get("symbol"))
+            self.pairs = pairs
+            self._filter_pairs()
+            self.state.set_state(AppState.PAIRS_LOADED)
+            self._log("Loaded pairs from Binance")
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Binance error", f"Failed to load pairs from Binance: {exc}\nCheck network/API access.")
+            self._log(f"Pairs load failed: {exc}")
 
     def _filter_pairs(self) -> None:
         term = self.filter_var.get().lower()
@@ -308,6 +445,11 @@ class BBOTApp:
                     pair.get("symbol"),
                     pair.get("base"),
                     pair.get("quote"),
+                    pair.get("status"),
+                    pair.get("tick_size"),
+                    pair.get("step_size"),
+                    pair.get("min_notional"),
+                    pair.get("volume"),
                     pair.get("fee_free"),
                     pair.get("fee_method"),
                 ),
@@ -321,10 +463,11 @@ class BBOTApp:
         if values:
             symbol = values[0]
             self.config_service.config.app.active_pair = symbol
+            self.active_pair = symbol
             self.state.set_state(AppState.PAIRS_LOADED)
             self._refresh_status()
             self._log(f"Selected pair: {symbol}")
-            self.notebook.select(self.trading_frame)
+            self._refresh_market_block()
 
     def _run_ai(self) -> None:
         prompt = build_prompt(self.config_service.config)
@@ -394,10 +537,11 @@ class BBOTApp:
         cfg.risk.max_drawdown_pct = float(self.risk_vars["max_drawdown_pct"].get() or 0)
         cfg.risk.per_trade_risk_pct = float(self.risk_vars["per_trade_risk_pct"].get() or 0)
         cfg.risk.max_concurrent_trades = int(float(self.risk_vars["max_concurrent_trades"].get() or 0))
-        self.binance_client = BinanceClient(
-            api_key=cfg.api_keys.exchange_key,
-            api_secret=cfg.api_keys.exchange_secret,
-            testnet=cfg.app.testnet,
+        self.http_client = BinanceHttpClient(logger=self.logger)
+        self.binance_service = BinanceDataService(
+            self.http_client,
+            manual_fee_free=cfg.pairs.manual_fee_free,
+            heuristic_quotes=cfg.pairs.heuristic_quote_whitelist,
             logger=self.logger,
         )
         try:

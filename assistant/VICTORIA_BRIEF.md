@@ -1,43 +1,4 @@
-# Victoria Brief
-
-## Что это
-Desktop GUI-бот-помощник для подготовки и запуска торговых стратегий (пока без реальных ордеров). Делает: конфиги, загрузку fee-free пар, AI-анализ параметров, контроль стейта и логирование.
-
-## Как запускать
-1. Убедись, что создан venv `.venv` и установлены зависимости из `requirements.txt`.
-2. На Windows запусти `run_app.bat` (или `python main.py`).
-3. Конфиг по умолчанию: `config/config.yaml` (локальный, не в git). Пример — `config/config.example.yaml`.
-
-## Структура
-- `ui/` — Tkinter GUI, вкладки, обработчики.
-- `core/` — конфиги, стейт, логирование.
-- `ai/` — prompt builder, клиент (OpenAI или мок).
-- `exchanges/` — интерфейс бирж, мок загрузки пар.
-- `assistant/` — файлы связи Codex ↔ Victoria.
-- `docs/` — ТЗ, roadmap, UI-спека, AI-контракт, конфиги, безопасность.
-
-## Рабочий процесс Codex ↔ Victoria
-- Все актуальные договоренности лежат в `assistant/DECISIONS.md`.
-- Открытые вопросы фиксируются в `assistant/QUESTIONS_FOR_VICTORIA.md`.
-- Срез по состоянию проекта — `assistant/STATUS.md` (DONE/DOING/BLOCKERS/Next 3 steps).
-- Оперативные изменения — `assistant/CHANGELOG_DEV.md`.
-- Если делаешь изменения — обнови соответствующие файлы, чтобы параллельная работа без переписки сохранялась.
-
-## Текущее состояние
-- GUI работает в мок-режиме, все кнопки выполняют действие (логи/статусы).
-- Конфиги можно загрузить/сохранить через UI; показывается активный файл.
-- Fee-free пары подгружаются из Binance (python-binance, с fallback в мок), фильтры: search/quote/fee-free, выбор сразу активирует вкладку Trading.
-- AI-аналитика через мок клиента с валидацией JSON.
-- State machine отслеживает переходы между `IDLE → CONFIGURED → PAIRS_LOADED → AI_READY → RUNNING → STOPPED/ERROR`.
-
-## Как Виктории быстро разобраться
-- Начни с `README.md` и `docs/ROADMAP.md`.
-- Посмотри UI-код: `ui/app.py` и `ui/widgets.py`.
-- Логика конфигов и стейта: `core/config_service.py`, `core/state.py`.
-- AI-контракт: `docs/AI_CONTRACT.md`, реализация `ai/client.py`, `ai/prompt_builder.py`.
-
-## Точки расширения
-- Подключение реальной биржи: реализовать клиент в `exchanges/` и заменить мок в `exchanges/mock.py`.
-- Реальный торговый движок: модуль `strategies/` и orchestration в `core/`.
-- Расширение риск-менеджмента: `risk/rules.py`.
-- Подключение OpenAI: заполнить ключ в конфиге, обновить `ai/client.py` для реального вызова.
+# VICTORIA_BRIEF
+- Implemented strict Binance-backed pair loading and market snapshots; UI surfaces live values without mock defaults.
+- Terminal-inspired layout with left navigation, center workspace (dashboard/pairs/risk/logs), and right trading/AI dock.
+- AI autopilot groundwork added via advisor stub and policy/execution/decision interfaces; future action contract documented.
