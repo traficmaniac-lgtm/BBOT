@@ -1,7 +1,5 @@
-﻿.venv/
 __pycache__/
-*.pyc
-.env
-config/config.local.yaml
-data/
-logs/
+.venv/
+config/config.yaml
+logs/*.log
+.DS_Store
