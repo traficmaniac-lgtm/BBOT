@@ -1,4 +1,4 @@
 # QUESTIONS
-- Should we prioritize full websocket streaming for the active pair (bookTicker/miniTicker) in the trading panel, or keep REST snapshot refresh?
-- Any specific fee-free symbols we should whitelist manually until Binance exposes an explicit API flag?
-- Do we need persistence for saved profiles in the new trading panel (profiles/*.yaml) immediately, or plan for next iteration?
+- Should AI suggestions also adjust mode/live flags or remain constrained to paper for now?
+- Do we need websocket streaming for the active pair to keep the Trade snapshot real-time, or is manual refresh acceptable?
+- Any required defaults for cooldown/update_interval beyond current conservative values?

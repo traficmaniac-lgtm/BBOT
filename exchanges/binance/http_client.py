@@ -23,6 +23,7 @@ class BinanceHttpClient:
         self.max_retries = max_retries
         self.logger = logger
         self.cooldown_until = 0
+        self.last_latency_ms: float | None = None
 
     def _log(self, level: str, message: str, *args: Any) -> None:
         if self.logger:
@@ -38,7 +39,9 @@ class BinanceHttpClient:
             if now < self.cooldown_until:
                 time.sleep(self.cooldown_until - now)
             try:
+                start = time.time()
                 response = self.session.get(url, params=params, timeout=self.timeout)
+                self.last_latency_ms = (time.time() - start) * 1000
                 if response.status_code in (418, 429):
                     wait_for = int(response.headers.get("Retry-After", backoff))
                     self.cooldown_until = time.time() + wait_for
@@ -66,6 +69,9 @@ class BinanceHttpClient:
 
     def fetch_book_ticker(self, symbol: str) -> Dict:
         return self.get_json("/api/v3/ticker/bookTicker", params={"symbol": symbol})
+
+    def fetch_all_book_ticker(self) -> list:
+        return self.get_json("/api/v3/ticker/bookTicker")
 
     def fetch_time(self) -> Dict:
         return self.get_json("/api/v3/time")

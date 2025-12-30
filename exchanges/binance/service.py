@@ -80,6 +80,26 @@ class BinanceDataService:
             self._log("warning", "Fee data unavailable from Binance: %s", exc)
             return []
 
+    def market_overview(self) -> Dict[str, Dict[str, float | str | None]]:
+        stats_raw = self.http_client.fetch_ticker_24h()
+        book_raw = self.http_client.fetch_all_book_ticker()
+        stats_map = {item.get("symbol"): item for item in stats_raw} if isinstance(stats_raw, list) else {}
+        book_map = {item.get("symbol"): item for item in book_raw} if isinstance(book_raw, list) else {}
+        overview: Dict[str, Dict[str, float | str | None]] = {}
+        for symbol, item in stats_map.items():
+            book_entry = book_map.get(symbol, {})
+            bid = float(book_entry.get("bidPrice", 0) or 0)
+            ask = float(book_entry.get("askPrice", 0) or 0)
+            spread = (ask - bid) if bid and ask else None
+            overview[symbol] = {
+                "last": float(item.get("lastPrice", 0) or 0),
+                "volume": float(item.get("volume", 0) or 0),
+                "bid": bid or None,
+                "ask": ask or None,
+                "spread": spread,
+            }
+        return overview
+
     def fetch_market_snapshot(self, symbol: str) -> MarketSnapshot:
         stats = self.http_client.fetch_ticker_24h(symbol)
         book = self.http_client.fetch_book_ticker(symbol)

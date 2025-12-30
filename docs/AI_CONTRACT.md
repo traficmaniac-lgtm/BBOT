@@ -1,43 +1,31 @@
 # AI Contract
 
 ## Запрос
-- Формат: текстовый промт с описанием пары, бюджета, предпочтений риска и ограничений биржи.
-- AI обязан ответить СТРОГО JSON, без префиксов/суффиксов.
+- Формат: промт с активной парой, рыночным срезом, фильтрами биржи и текущими настройками.
+- Пользователь добавляет текстовый запрос; AI отвечает в единственном сообщении.
 
-## Ответ JSON (пример)
-```json
+## Формат ответа
+Ответ состоит из двух секций:
+```
+### EXPLANATION
+<краткий текст>
+### SETTINGS_JSON
 {
-  "pair": "BTCUSDT",
-  "budget_usdt": 250,
-  "leverage": 3,
-  "timeframe": "1h",
-  "take_profit_pct": 4.5,
-  "stop_loss_pct": 2.0,
-  "rationale": "Trend is bullish on higher timeframe, risk balanced.",
-  "risk_notes": "Keep exposure under 5% account, tighten if volatility spikes."
+  "budget_usdt": 150,
+  "max_orders": 4,
+  "grid_step_pct": 0.4,
+  "take_profit_pct": 1.8,
+  "stop_loss_pct": 1.2,
+  "cooldown_seconds": 12,
+  "update_interval_ms": 1200
 }
 ```
 
 ## Валидация
-- `pair`: строка, не пустая.
-- `budget_usdt`: float > 0.
-- `leverage`: int >= 1.
-- `timeframe`: строка из списка [`15m`, `1h`, `4h`, `1d`].
-- `take_profit_pct`, `stop_loss_pct`: float >= 0.
-- `rationale`, `risk_notes`: строки, могут быть пустыми, но ключи обязательны.
+- SETTINGS_JSON валидируется через `TradeSettingsSchema` в `ai/client.py` (все поля обязательны, числа >= 0).
+- EXPLANATION сохраняется как текст без доп. требований.
+- При ошибке парсинга/валидации state=ERROR и показывается сообщение пользователю; повтор до исчерпания `max_retries`.
 
 ## Ошибки
-- Любое отклонение формата → state = ERROR, запись в лог, повтор запроса (до 2 раз в мок-режиме).
-
-
-## Contract B: Future action payload (AUTOPILOT)
-AI will return a list of actions with schema:
-```
-{
-  "actions": [
-    {"type": "buy" | "sell" | "cancel" | "update", "symbol": "BTCUSDT", "amount": 0.1, "reason": "signal text"}
-  ],
-  "notes": "why the plan is safe"
-}
-```
-Each action will be validated by `core.policy_guard.PolicyGuard` before any execution.
+- Отсутствие секции `### SETTINGS_JSON` или невалидный JSON → показ ошибки в UI, Apply недоступен.
+- Секреты (ключи) никогда не логируются в AI запросах/ответах.

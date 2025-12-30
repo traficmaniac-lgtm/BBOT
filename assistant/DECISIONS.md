@@ -1,6 +1,6 @@
 # DECISIONS
-- Binance API is sole source of pair and market data; PairLoader no longer falls back to mocks. Offline failures surface in UI dialogs.
-- Fee-free flagging uses Binance tradeFee endpoint when available, then heuristic quote whitelist and manual overrides; noted as Binance limitation for explicit fee-free list.
-- ExchangeInfo is cached via BinanceDataService with optional manual refresh via UI retry.
-- Websocket integration uses python-binance SpotWebsocketClient with reconnect helper; tests mock the socket to avoid network reliance.
-- Time sync derived from /api/v3/time measuring round-trip latency; displayed as offset in trading panel.
+- AI prompt format forces two blocks: `### EXPLANATION` followed by `### SETTINGS_JSON` that must validate against TradeSettingsSchema.
+- Binance REST endpoints are the only market source: exchangeInfo for filters, ticker/24hr + bookTicker for last/bid/ask/spread/vol.
+- Fee-free column relies on Binance tradeFee when available, then heuristic quote whitelist or manual config whitelist with method labeling.
+- Status bar reports Binance latency from the last REST call; OpenAI indicator shows live vs mock depending on key presence.
+- Mode locked to paper in UI; live trading toggle intentionally disabled pending further requirements.
